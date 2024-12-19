@@ -1,0 +1,27 @@
+# Ignore Python bytecode files
+*.pyc
+*.pyo
+*.pyd
+__pycache__/
+
+# Ignore virtual environment directory
+venv/
+
+# Ignore IDE and editor files
+.idea/
+
+# Ignore environment files
+.env
+
+# Ignore cloud ignore files
+.gcloudignore
+
+# Ignore test results
+*.log
+*.sqlite
+
+# Ignore database
+dbat/
+
+# Ignore requirements file
+requirements.txt
