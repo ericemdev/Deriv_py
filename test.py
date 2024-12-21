@@ -9,7 +9,7 @@ def get_json():
     return {
         "method": "POST",
         "message": {
-            "data": base64.b64encode(b"buy q=700 frxAUDUSD e=15m").decode(),  # Duration in minutes
+            "data": base64.b64encode(b"BUY R_100 q=10 expiry=5m").decode(),
             "attributes": {
                 'platform': 'deriv',
                 "activation": "S63D7RaUkghFBfZMdfJZ",
@@ -22,3 +22,5 @@ def get_json():
 if __name__ == "__main__":
     req = AttrDict({"get_json": get_json})
     print(deriv(req.get_json()))
+
+

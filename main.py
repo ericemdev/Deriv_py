@@ -15,7 +15,6 @@ load_dotenv()
 APP_ID = os.getenv("APP_ID")
 API_TOKEN = os.getenv("API_TOKEN")
 
-
 async def connect():
     try:
         websocket = await websockets.connect(f"wss://ws.binaryws.com/websockets/v3?app_id={APP_ID}")
@@ -44,8 +43,15 @@ async def execute_commands(websocket, commands, return_dict):
                 balance = response.get("balance", {}).get("balance", "N/A")
                 results.append(f"Balance: {balance}")
 
+            elif side == "PORTFOLIO":
+                await websocket.send(json.dumps({"portfolio": 1}))
+                response = json.loads(await websocket.recv())
+                print("Portfolio response:", response)
+                portfolio = response.get("portfolio", {}).get("contracts", "N/A")
+                results.append(f"Portfolio: {portfolio}")
+
+
             elif side == "SYMBOLS":
-                option_type = command.get("type", "BINARY")
                 await websocket.send(json.dumps({"active_symbols": "brief"}))
                 response = json.loads(await websocket.recv())
                 print("Symbols response:", response)
@@ -59,19 +65,25 @@ async def execute_commands(websocket, commands, return_dict):
                     continue
 
                 trade_type = "CALL" if side == "BUY" else "PUT"
+                contract_type = command.get("type", "binary").upper()
                 trade_request = {
                     "buy": 1,
                     "price": command["stake"],
                     "parameters": {
                         "symbol": command["symbol"],
                         "basis": "stake",
-                        "duration": command.get("expiry", 1),
-                        "duration_unit": command.get("duration_unit", "d"),
+                        "duration": command.get("duration", 1),
+                        "duration_unit": command.get("duration_unit", "m"),
                         "contract_type": trade_type,
                         "currency": "USD",
                         "amount": command["stake"]
                     },
                 }
+            #specific params for digital options
+                if contract_type == "DIGITAL":
+                    barrier_value = command.get("barrier", 0.1)
+                    trade_request["parameters"]["barrier"] = barrier_value
+
 
                 if "sl" in command:
                     trade_request["parameters"]["stop_loss"] = command["sl"]
@@ -87,6 +99,28 @@ async def execute_commands(websocket, commands, return_dict):
                     raise Exception(f"Trade error: {response['error']['message']}")
                 else:
                     results.append(f"Trade Executed: {response.get('buy', 'Unknown response')}")
+
+            elif side == "CANCEL":
+                contract_id = command.get("contract_id")
+                if not contract_id:
+                    results.append("Error: Missing 'contract_id' for cancel request.")
+                    continue
+
+                cancel_request = {
+                    "cancel": 1,
+                    "contract_id": contract_id
+                }
+
+                print(f"Sending cancel request: {cancel_request}")
+                await websocket.send(json.dumps(cancel_request))
+                response = json.loads(await websocket.recv())
+                print("Cancel response:", response)
+
+                if "error" in response:
+                    raise Exception(f"Cancel error: {response['error']['message']}")
+                else:
+                    results.append(f"Trade Cancelled: {response.get('cancel', 'Unknown response')}")
+
 
             elif side == "CLOSE":
                 if not command.get("symbol"):
@@ -113,7 +147,6 @@ async def execute_commands(websocket, commands, return_dict):
             break
 
     return_dict["result"] = "\n".join(results)
-
 
 def execute(data, return_dict):
     print("Executing", data)
@@ -145,7 +178,7 @@ def deriv(req):
     executes = []
     commands = body.upper().split("\n")
     for command in commands:
-        params, message = extract(["quantity", "expiry", "symbol", "stake", "sl" "tp"], command)
+        params, message = extract(["quantity", "expiry", "symbol", "stake", "type", "barrier", "sl", "tp"], command)
 
         if message.strip():
             params["side"] = message.split()[0]
