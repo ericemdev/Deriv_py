@@ -15,184 +15,117 @@ load_dotenv()
 APP_ID = os.getenv("APP_ID")
 API_TOKEN = os.getenv("API_TOKEN")
 
+
 async def connect():
     try:
-        websocket = await websockets.connect(f"wss://ws.binaryws.com/websockets/v3?app_id={APP_ID}")
-        await websocket.send(json.dumps({"authorize": API_TOKEN}))
-        response = json.loads(await websocket.recv())
-        if "error" in response:
-            raise Exception(f"Authentication failed: {response['error']['message']}")
-        return websocket
+        ws = await websockets.connect(f"wss://ws.binaryws.com/websockets/v3?app_id={APP_ID}")
+        await ws.send(json.dumps({"authorize": API_TOKEN}))
+        res = json.loads(await ws.recv())
+        if "error" in res: raise Exception(res['error']['message'])
+        return ws
     except Exception as e:
-        raise Exception(f"Connection error: {e}")
+        raise Exception(f"Conn err: {e}")
 
-
-async def execute_commands(websocket, commands, return_dict):
-    print("Executing commands", commands)
-    results = []
-
-    for command in commands:
+async def exec_cmds(ws, cmds, ret):
+    res = []
+    for cmd in cmds:
         try:
-            side = command["side"].upper()
-            print(f"Executing {side} command for symbol: {command.get('symbol', 'N/A')}")
-
+            side = cmd["side"].upper()
             if side == "BALANCE":
-                await websocket.send(json.dumps({"balance": 1}))
-                response = json.loads(await websocket.recv())
-                print("Balance response:", response)
-                balance = response.get("balance", {}).get("balance", "N/A")
-                results.append(f"Balance: {balance}")
-
+                await ws.send(json.dumps({"balance": 1}))
+                r = json.loads(await ws.recv())
+                res.append(f"Bal: {r.get('balance', {}).get('balance', 'N/A')}")
             elif side == "PORTFOLIO":
-                await websocket.send(json.dumps({"portfolio": 1}))
-                response = json.loads(await websocket.recv())
-                print("Portfolio response:", response)
-                portfolio = response.get("portfolio", {}).get("contracts", "N/A")
-                results.append(f"Portfolio: {portfolio}")
-
-
+                await ws.send(json.dumps({"portfolio": 1}))
+                r = json.loads(await ws.recv())
+                res.append(f"Port: {r.get('portfolio', {}).get('contracts', 'N/A')}")
             elif side == "SYMBOLS":
-                await websocket.send(json.dumps({"active_symbols": "brief"}))
-                response = json.loads(await websocket.recv())
-                print("Symbols response:", response)
-                symbols = [s["symbol"] for s in response.get("active_symbols", [])]
-                results.append(f"Available Symbols: {', '.join(symbols)}")
-
-
+                await ws.send(json.dumps({"active_symbols": "brief"}))
+                r = json.loads(await ws.recv())
+                syms = [s["symbol"] for s in r.get("active_symbols", [])]
+                res.append(f"Syms: {', '.join(syms)}")
             elif side in ["BUY", "SELL"]:
-                if not command.get("symbol") or not command.get("stake"):
-                    results.append("Error: Missing 'symbol' or 'stake' for trade.")
+                if not cmd.get("symbol") or not cmd.get("stake"):
+                    res.append("Err: Miss 'sym' or 'stk'")
                     continue
-
-                trade_type = "CALL" if side == "BUY" else "PUT"
-                contract_type = command.get("type", "binary").upper()
-                trade_request = {
+                tt = "CALL" if side == "BUY" else "PUT"
+                ct = cmd.get("type", "binary").upper()
+                tr = {
                     "buy": 1,
-                    "price": command["stake"],
+                    "price": cmd["stake"],
                     "parameters": {
-                        "symbol": command["symbol"],
+                        "symbol": cmd["symbol"],
                         "basis": "stake",
-                        "duration": command.get("duration", 1),
-                        "duration_unit": command.get("duration_unit", "m"),
-                        "contract_type": trade_type,
+                        "duration": cmd.get("duration", 1),
+                        "duration_unit": cmd.get("duration_unit", "m"),
+                        "contract_type": tt,
                         "currency": "USD",
-                        "amount": command["stake"]
+                        "amount": cmd["stake"]
                     },
                 }
-            #specific params for digital options
-                if contract_type == "DIGITAL":
-                    barrier_value = command.get("barrier", 0.1)
-                    trade_request["parameters"]["barrier"] = barrier_value
-
-
-                if "sl" in command:
-                    trade_request["parameters"]["stop_loss"] = command["sl"]
-                if "tp" in command:
-                    trade_request["parameters"]["take_profit"] = command["tp"]
-
-                print(f"Sending trade request: {trade_request}")
-                await websocket.send(json.dumps(trade_request))
-                response = json.loads(await websocket.recv())
-                print("Trade response:", response)
-
-                if "error" in response:
-                    raise Exception(f"Trade error: {response['error']['message']}")
-                else:
-                    results.append(f"Trade Executed: {response.get('buy', 'Unknown response')}")
-
+                if ct == "DIGITAL": tr["parameters"]["barrier"] = cmd.get("barrier", 0.1)
+                if "sl" in cmd: tr["parameters"]["stop_loss"] = cmd["sl"]
+                if "tp" in cmd: tr["parameters"]["take_profit"] = cmd["tp"]
+                await ws.send(json.dumps(tr))
+                r = json.loads(await ws.recv())
+                res.append(f"Trade executed✅: {r.get('buy', 'Unknown')}")
             elif side == "CANCEL":
-                contract_id = command.get("contract_id")
-                if not contract_id:
-                    results.append("Error: Missing 'contract_id' for cancel request.")
+                cid = cmd.get("contract_id")
+                if not cid:
+                    res.append("Err: Miss 'cid'")
                     continue
-
-                cancel_request = {
-                    "cancel": 1,
-                    "contract_id": contract_id
-                }
-
-                print(f"Sending cancel request: {cancel_request}")
-                await websocket.send(json.dumps(cancel_request))
-                response = json.loads(await websocket.recv())
-                print("Cancel response:", response)
-
-                if "error" in response:
-                    raise Exception(f"Cancel error: {response['error']['message']}")
-                else:
-                    results.append(f"Trade Cancelled: {response.get('cancel', 'Unknown response')}")
-
-
+                await ws.send(json.dumps({"cancel": 1, "contract_id": cid}))
+                r = json.loads(await ws.recv())
+                res.append(f"Cancel: {r.get('cancel', 'Unknown')}")
             elif side == "CLOSE":
-                if not command.get("symbol"):
-                    results.append("Error: Missing 'symbol' for close trade.")
+                if not cmd.get("symbol"):
+                    res.append("Err: Miss 'sym'")
                     continue
-
-                close_request = {
-                    "sell": command.get("symbol"),
-                    "price": command.get("stake", 0),
-                }
-
-                print(f"Sending close request: {close_request}")
-                await websocket.send(json.dumps(close_request))
-                response = json.loads(await websocket.recv())
-                print("Close response:", response)
-
-                if "error" in response:
-                    raise Exception(f"Close error: {response['error']['message']}")
-                else:
-                    results.append(f"Trade Closed: {response.get('sell', 'Unknown response')}")
-
+                await ws.send(json.dumps({"sell": cmd.get("symbol"), "price": cmd.get("stake", 0)}))
+                r = json.loads(await ws.recv())
+                res.append(f"Close: {r.get('sell', 'Unknown')}")
         except Exception as e:
-            results.append(f"Error: {e}")
+            res.append(f"Err: {e}")
             break
+    ret["result"] = "\n".join(res)
 
-    return_dict["result"] = "\n".join(results)
-
-def execute(data, return_dict):
-    print("Executing", data)
-    async def run_execution():
+def exec(data, ret):
+    async def run_exec():
         try:
-            websocket = await connect()
-            await execute_commands(websocket, data["executes"], return_dict)
-            await websocket.close()
+            ws = await connect()
+            await exec_cmds(ws, data["executes"], ret)
+            await ws.close()
         except Exception as e:
-            return_dict["result"] = f"Execution failed: {e}"
-
-    asyncio.run(run_execution())
+            ret["result"] = f"Exec failed: {e}"
+    asyncio.run(run_exec())
 
 def deriv(req):
-    started = time.time()
-
-    attributes = req["message"]["attributes"]
+    start = time.time()
+    attr = req["message"]["attributes"]
     body = base64.b64decode(req["message"]["data"]).decode()
-
-    msg = attributes
+    msg = attr
     msg["created"] = datetime.datetime.now(tz=datetime.timezone.utc)
     msg["message"] = body
 
-    def finish(status, results):
-        msg["result"] = results
+    def finish(st, res):
+        msg["result"] = res
         saveLog(msg)
-        return results, status
+        return res, st
 
-    executes = []
-    commands = body.upper().split("\n")
-    for command in commands:
-        params, message = extract(["quantity", "expiry", "symbol", "stake", "type", "barrier", "sl", "tp"], command)
+    execs = []
+    cmds = body.upper().split("\n")
+    for cmd in cmds:
+        p, m = extract(["quantity", "expiry", "symbol", "stake", "type", "barrier", "sl", "tp"], cmd)
+        if m.strip(): p["side"] = m.split()[0]
+        else: continue
+        if "side" in p and p["side"]:
+            execs.append(p)
 
-        if message.strip():
-            params["side"] = message.split()[0]
-        else:
-            continue
-
-        if "side" in params and params["side"]:
-            executes.append(params)
-
-    manager = multiprocessing.Manager()
-    return_dict = manager.dict()
-    data = {"attributes": attributes, "executes": executes}
-    executor = multiprocessing.Process(target=execute, args=(data, return_dict))
+    mgr = multiprocessing.Manager()
+    ret = mgr.dict()
+    data = {"attributes": attr, "executes": execs}
+    executor = multiprocessing.Process(target=exec, args=(data, ret))
     executor.start()
     executor.join()
 
-    return finish(200, list(return_dict.values())[0])
+    return finish(200, list(ret.values())[0])
